@@ -1,5 +1,5 @@
 Problem Statement
-You are tasked with building a social network app where users must provide a fixed set of attributes when joining the app. The app will automatically group users based on these attributes, but the grouping should not require an exact match of all attributes. Rather, users should be grouped based on a subset of matching attributes.
+building a social network app where users must provide a fixed set of attributes when joining the app. The app will automatically group users based on these attributes, but the grouping should not require an exact match of all attributes. Rather, users should be grouped based on a subset of matching attributes.
 
 User Attributes Example:
 User 1: {Software, Engineer, Brussels, Belgium, Senior}
@@ -45,7 +45,6 @@ If the overlap exceeds a certain threshold (e.g., 3 attributes), the user is gro
 Implementation
 Database Models (SQLAlchemy)
 python
-Copy code
 from sqlalchemy.dialects.postgresql import JSONB
 from database import db
 
@@ -59,7 +58,6 @@ class Group(db.Model):
     attributes = db.Column(JSONB, nullable=False)  # Stores group attributes as JSONB
 Group Assignment Logic
 python
-Copy code
 def assign_group(user_id, attributes, minimum_matching_threshold=3):
     global group_map
     user_attributes_set = set(attributes)
@@ -93,7 +91,6 @@ def assign_group(user_id, attributes, minimum_matching_threshold=3):
     return group_id
 API Routes
 python
-Copy code
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.json

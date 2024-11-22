@@ -1,117 +1,73 @@
-Project Overview
-This Flask application implements a social network where users are automatically grouped based on their attributes. Users specify a set of attributes when joining the app, and the system groups them with others who share a subset of those attributes, according to a configurable matching threshold.
+Problem Statement
+You are tasked with building a social network app where users must provide a fixed set of attributes when joining the app. The app will automatically group users based on these attributes, but the grouping should not require an exact match of all attributes. Rather, users should be grouped based on a subset of matching attributes.
 
-If no existing group satisfies the matching criteria, a new group is created. The application supports:
+User Attributes Example:
+User 1: {Software, Engineer, Brussels, Belgium, Senior}
+User 2: {Software, Engineer, Gamer, Senior}
+Both users have some common attributes, such as "Software", "Engineer", and "Senior", and thus, they should be grouped together, even though their other attributes (like "Brussels" and "Gamer") differ.
 
-Automatic user grouping.
-JWT-based authentication for secure endpoints.
-Viewing group members.
-Key Components
-1. Flask Application Structure
-The project structure includes:
+Solution Overview
+This application implements a grouping system where:
 
-Models (models.py): Defines the database models for User and Group.
-Schemas (schemas.py): Provides serialization/deserialization of data for API endpoints using Marshmallow.
-Database (database.py): Sets up the SQLAlchemy integration for PostgreSQL.
-Configuration (config.py): Centralized configuration settings for the app.
-Application Logic (app.py): Contains routes for user signup, authentication, and group retrieval.
-2. Key Functionalities
-User Signup
-Endpoint: /signup
-Method: POST
-Description:
-Adds a new user to the database.
-Automatically assigns the user to an existing group or creates a new group if no suitable match is found.
-User Signin
-Endpoint: /signin
-Method: POST
-Description:
-Authenticates the user by generating a JWT token.
-Retrieve Group Members
-Endpoint: /groups/<int:user_id>
-Method: GET
-Description:
-Retrieves the group and its members for a given user ID.
-Requires JWT authentication.
-How the Grouping Works
-Grouping Logic
-The assign_group function ensures that users are grouped effectively:
+Users are assigned a unique ID when they join the app.
+Users specify a set of attributes upon registration.
+The system automatically groups users with matching attributes, where at least a subset of the attributes must match.
+If no matching group exists, a new group is created for the user.
+Users can view all other users in their group via an API.
+Key Features
+Signup: Users provide a set of attributes upon registration.
+Signin: Users can sign in and get a token for subsequent requests.
+Get Group: Users can see all the users in their assigned group.
+Grouping Logic: Users are grouped based on matching attributes (with a configurable threshold).
+Database Integration: PostgreSQL for persistent storage of users and groups.
+Solution Design
+Group Assignment Algorithm
+Grouping Users:
 
-Checks all existing groups using the group_map (an in-memory dictionary for performance).
-Calculates the intersection of attributes between the user and each group.
-Selects the group with the most matching attributes (at least minimum_matching_threshold attributes).
-If no group satisfies the threshold, a new group is created, and the user is assigned to it.
-Code Breakdown
-Models
+When a new user joins, the system looks for existing groups that share a subset of attributes.
+The assign_group function checks if a group exists that shares at least a specified minimum number of attributes (e.g., 3 attributes).
+If no group matches, a new group is created.
+Data Structure Used:
+
+In-memory group_map: This dictionary stores group data to speed up the search for matching groups.
+The keys are group_id values.
+The values are sets of user attributes.
+This allows efficient lookups and comparisons of user attributes against existing groups.
+Database Integration:
+
+SQLAlchemy is used to manage users and groups in a PostgreSQL database.
+JSONB data type is used for storing user and group attributes in the database, allowing flexible and efficient querying.
+Grouping Logic:
+
+Each user’s attributes are converted into a set to perform efficient set intersection operations.
+The system then checks for overlapping attributes between the user's set and the sets of attributes already present in groups.
+If the overlap exceeds a certain threshold (e.g., 3 attributes), the user is grouped with the matching group.
+Implementation
+Database Models (SQLAlchemy)
 python
 Copy code
+from sqlalchemy.dialects.postgresql import JSONB
 from database import db
-from sqlalchemy.dialects.postgresql import JSON, JSONB
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    attributes = db.Column(db.JSON, nullable=False)  # Stores user attributes as JSON
-    group_id = db.Column(db.Integer, db.ForeignKey('group.id'))  # Links user to a group
+    attributes = db.Column(db.JSON, nullable=False)
+    group_id = db.Column(db.Integer, db.ForeignKey('group.id'))  # Foreign key to Group
 
 class Group(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     attributes = db.Column(JSONB, nullable=False)  # Stores group attributes as JSONB
-Schemas
+Group Assignment Logic
 python
 Copy code
-from flask_marshmallow import Marshmallow
-
-ma = Marshmallow()
-
-class UserSchema(ma.Schema):
-    class Meta:
-        fields = ('id', 'attributes', 'group_id')  # Fields exposed in the API
-
-class GroupSchema(ma.Schema):
-    class Meta:
-        fields = ('id', 'attributes', 'users')  # Fields exposed in the API
-Database Setup
-python
-Copy code
-from flask_sqlalchemy import SQLAlchemy
-
-db = SQLAlchemy()
-Application Configuration
-python
-Copy code
-import os
-
-class Config:
-    SECRET_KEY = os.environ.get("SECRET_KEY", "mysecret")
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", "postgresql://postgres:postgres@localhost/assignment"
-    )
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
-    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "jwtsecret")
-Grouping Logic
-python
-Copy code
-from models import User, Group
-from database import db
-
-group_map = {}  # In-memory data structure: {group_id: set(attributes)}
-
-def initialize_group_map():
-    """
-    Populate the in-memory group_map from the database.
-    """
-    global group_map
-    group_map = {group.id: set(group.attributes) for group in Group.query.all()}
-
 def assign_group(user_id, attributes, minimum_matching_threshold=3):
-    """
-    Assign a user to a group based on attribute matching. Create a new group if no match.
-    """
     global group_map
     user_attributes_set = set(attributes)
+    
     best_group = None
     max_matching_attributes = 0
 
+    # Iterate over all groups in the group_map
     for group_id, group_attributes_set in group_map.items():
         matching_attributes = user_attributes_set & group_attributes_set
         match_count = len(matching_attributes)
@@ -120,37 +76,24 @@ def assign_group(user_id, attributes, minimum_matching_threshold=3):
             max_matching_attributes = match_count
             best_group = group_id
 
-    if best_group:
-        group_id = best_group
-    else:
+    # Assign user to the best matching group or create a new one
+    if not best_group:
         new_group = Group(attributes=attributes)
         db.session.add(new_group)
         db.session.commit()
         group_map[new_group.id] = user_attributes_set
         group_id = new_group.id
+    else:
+        group_id = best_group
 
     user = User.query.get(user_id)
     user.group_id = group_id
     db.session.commit()
 
     return group_id
-Routes
+API Routes
 python
 Copy code
-from flask import Flask, request, jsonify
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required
-from flask_migrate import Migrate
-from database import db
-from models import User, Group
-from schemas import UserSchema, GroupSchema
-
-app = Flask(__name__)
-app.config.from_object('config.Config')
-
-db.init_app(app)
-jwt = JWTManager(app)
-migrate = Migrate(app, db)
-
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.json
@@ -161,48 +104,36 @@ def signup():
 
     assign_group(user.id, attributes)
     return UserSchema().jsonify(user), 201
+Testing and Evaluation
+Testing Approach
+Unit Tests:
+Ensure that users are grouped correctly based on overlapping attributes.
+Verify that new groups are created when no suitable match is found.
+Confirm that the group_map is updated when new groups are created.
+Performance Tests:
+Evaluate how the system scales by simulating high volumes of user signups with a variety of attributes.
+Test Case Scenarios
+Users with Identical Attributes:
+Both users have identical attributes. Expect them to be placed in the same group.
+Users with Partial Attribute Matches:
+Users with some overlapping attributes (e.g., 3 common attributes out of 5) should be placed in the same group.
+Users with No Matching Attributes:
+A new group should be created for the user.
+Users with Multiple Potential Matches:
+The user should join the group with the highest number of overlapping attributes.
+Why group_map was Chosen for Grouping
+Efficiency: The group_map is an in-memory dictionary that maps group_id to a set of attributes. Using sets enables efficient set intersection, allowing the app to quickly check for matching attributes between users and groups.
+Reduced Database Load: By storing the groups in memory, we reduce the number of database queries required for each new user. This is crucial for scalability, especially when there are a large number of users.
+Scalability: For a large-scale application with millions of users, constantly querying the database for matching groups would be inefficient. Using an in-memory cache like group_map ensures that we can check for matching groups in constant time.
+Scalability Considerations
+In-Memory Group Map:
 
-@app.route('/signin', methods=['POST'])
-def signin():
-    user_id = request.json.get('user_id')
-    token = create_access_token(identity=user_id)
-    return jsonify({'token': token})
+The group_map is suitable for handling moderate-sized datasets. For extremely large-scale applications, you can consider external caching systems like Redis or Memcached to store group data across multiple app instances.
+Database Optimization:
 
-@app.route('/groups/<int:user_id>', methods=['GET'])
-@jwt_required()
-def get_groups(user_id):
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
+For large datasets, indexing the attributes column in the database can speed up queries. PostgreSQL's JSONB index supports efficient querying of JSON attributes, which helps in searching for groups with similar attributes.
+Queueing and Background Tasks:
 
-    group = Group.query.get(user.group_id)
-    if not group:
-        return jsonify({'error': 'Group not found'}), 404
-
-    group_data = GroupSchema().dump(group)
-    return jsonify(group_data)
-
-if __name__ == '__main__':
-    app.run(debug=True)
-Testing
-1. Signup
-bash
-Copy code
-curl -X POST http://127.0.0.1:5000/signup -H "Content-Type: application/json" -d '{
-    "attributes": ["Software", "Engineer", "Senior", "Brussels"]
-}'
-2. Signin
-bash
-Copy code
-curl -X POST http://127.0.0.1:5000/signin -H "Content-Type: application/json" -d '{
-    "user_id": 1
-}'
-3. Get Group
-bash
-Copy code
-curl -X GET http://127.0.0.1:5000/groups/1 -H "Authorization: Bearer <JWT_TOKEN>"
-Deployment Notes
-Ensure PostgreSQL is running and properly configured in config.py.
-Use flask db init, flask db migrate, and flask db upgrade to set up the database.
-Summary
-This documentation covers all major components of the app, including how users are grouped, how routes function, and how to test and deploy the application. Let me know if you need further clarifications!
+Using Celery for background tasks (e.g., processing large batches of user signups or updating groups) can offload resource-intensive tasks from the main web request cycle, ensuring the app remains responsive.
+Conclusion
+This app efficiently groups users based on matching attributes and handles cases where no existing group meets the criteria by creating new groups. It uses an in-memory dictionary (group_map) to speed up group lookups and ensure efficient performance at scale. The system can be further optimized by integrating caching mechanisms like Redis and using background tasks for processing high volumes of user data.
